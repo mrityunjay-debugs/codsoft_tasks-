@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple To-Do List</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .completed-text { text-decoration: line-through; color: #9ca3af; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-2xl mx-auto bg-white rounded-xl shadow-md overflow-hidden">
+        
+        <!-- Header & Stats -->
+        <div class="bg-blue-600 text-white p-6">
+            <h1 class="text-2xl font-bold mb-4">My Tasks</h1>
+            <div class="flex justify-between text-sm bg-blue-700/50 p-3 rounded-lg">
+                <div>Total: <span id="stat-total" class="font-bold">0</span></div>
+                <div>Pending: <span id="stat-pending" class="font-bold">0</span></div>
+                <div>Completed: <span id="stat-completed" class="font-bold">0</span></div>
+            </div>
+        </div>
+
+        <div class="p-6 space-y-6">
+            <!-- Input Form -->
+            <form id="task-form" class="flex gap-2">
+                <input type="text" id="task-input" placeholder="What needs to be done?" 
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                <button type="submit" id="submit-btn" class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                    Add
+                </button>
+            </form>
+            <div id="error-msg" class="hidden text-red-500 text-sm mt-1">Task cannot be empty.</div>
+
+            <!-- Controls (Search & Filter) -->
+            <div class="flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                <input type="text" id="search-input" placeholder="Search tasks..." 
+                    class="w-full sm:w-1/2 px-3 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                
+                <div class="flex space-x-1" id="filters">
+                    <button data-filter="All" class="filter-btn px-3 py-1.5 text-sm font-medium rounded bg-blue-100 text-blue-700">All</button>
+                    <button data-filter="Pending" class="filter-btn px-3 py-1.5 text-sm font-medium rounded text-gray-600 hover:bg-gray-200">Pending</button>
+                    <button data-filter="Completed" class="filter-btn px-3 py-1.5 text-sm font-medium rounded text-gray-600 hover:bg-gray-200">Completed</button>
+                </div>
+            </div>
+
+            <!-- Task List -->
+            <ul id="task-list" class="divide-y divide-gray-100">
+                <!-- Tasks rendered here -->
+            </ul>
+            
+            <div id="empty-state" class="hidden text-center py-8 text-gray-500">
+                No tasks found.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // State
+            let tasks = JSON.parse(localStorage.getItem('simple_tasks')) || [];
+            let currentFilter = 'All';
+            let searchQuery = '';
+            let editId = null;
+
+            // DOM Elements
+            const form = document.getElementById('task-form');
+            const input = document.getElementById('task-input');
+            const submitBtn = document.getElementById('submit-btn');
+            const errorMsg = document.getElementById('error-msg');
+            const taskList = document.getElementById('task-list');
+            const emptyState = document.getElementById('empty-state');
+            const searchInput = document.getElementById('search-input');
+            const filterBtns = document.querySelectorAll('.filter-btn');
+
+            // Stats Elements
+            const statTotal = document.getElementById('stat-total');
+            const statPending = document.getElementById('stat-pending');
+            const statCompleted = document.getElementById('stat-completed');
+
+            function render() {
+                // Filter and Search Logic
+                let filtered = tasks.filter(t => t.text.toLowerCase().includes(searchQuery.toLowerCase()));
+                
+                if (currentFilter === 'Pending') filtered = filtered.filter(t => !t.completed);
+                if (currentFilter === 'Completed') filtered = filtered.filter(t => t.completed);
+
+                // Update Stats (Always based on total tasks)
+                const completedCount = tasks.filter(t => t.completed).length;
+                statTotal.textContent = tasks.length;
+                statCompleted.textContent = completedCount;
+                statPending.textContent = tasks.length - completedCount;
+
+                // Render HTML
+                taskList.innerHTML = '';
+                if (filtered.length === 0) {
+                    emptyState.classList.remove('hidden');
+                } else {
+                    emptyState.classList.add('hidden');
+                    filtered.forEach(task => {
+                        const li = document.createElement('li');
+                        li.className = 'py-3 flex items-center justify-between group';
+                        
+                        li.innerHTML = `
+                            <div class="flex items-center gap-3 flex-1 overflow-hidden">
+                                <input type="checkbox" ${task.completed ? 'checked' : ''} 
+                                    onchange="toggleTask(${task.id})"
+                                    class="w-5 h-5 cursor-pointer accent-blue-600 shrink-0">
+                                <span class="truncate ${task.completed ? 'completed-text' : 'text-gray-800'}">${escapeHTML(task.text)}</span>
+                            </div>
+                            <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-4">
+                                <button onclick="editTask(${task.id})" class="text-sm px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded">Edit</button>
+                                <button onclick="deleteTask(${task.id})" class="text-sm px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded">Delete</button>
+                            </div>
+                        `;
+                        taskList.appendChild(li);
+                    });
+                }
+                
+                // Persist
+                localStorage.setItem('simple_tasks', JSON.stringify(tasks));
+            }
+
+            // Add or Update Task
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const text = input.value.trim();
+                
+                if (!text) {
+                    errorMsg.classList.remove('hidden');
+                    return;
+                }
+                errorMsg.classList.add('hidden');
+
+                if (editId !== null) {
+                    // Update
+                    const taskIndex = tasks.findIndex(t => t.id === editId);
+                    if (taskIndex > -1) tasks[taskIndex].text = text;
+                    editId = null;
+                    submitBtn.textContent = 'Add';
+                    submitBtn.classList.replace('bg-green-600', 'bg-blue-600');
+                    submitBtn.classList.replace('hover:bg-green-700', 'hover:bg-blue-700');
+                } else {
+                    // Add
+                    tasks.push({
+                        id: Date.now(),
+                        text: text,
+                        completed: false
+                    });
+                }
+
+                input.value = '';
+                render();
+            });
+
+            // Actions (Exposed to window for inline HTML handlers)
+            window.deleteTask = (id) => {
+                tasks = tasks.filter(t => t.id !== id);
+                if (editId === id) resetForm(); // Cancel edit if deleting the active edit task
+                render();
+            };
+
+            window.toggleTask = (id) => {
+                const task = tasks.find(t => t.id === id);
+                if (task) task.completed = !task.completed;
+                render();
+            };
+
+            window.editTask = (id) => {
+                const task = tasks.find(t => t.id === id);
+                if (!task) return;
+                
+                editId = id;
+                input.value = task.text;
+                input.focus();
+                
+                // Change button appearance to indicate editing
+                submitBtn.textContent = 'Update';
+                submitBtn.classList.replace('bg-blue-600', 'bg-green-600');
+                submitBtn.classList.replace('hover:bg-blue-700', 'hover:bg-green-700');
+            };
+
+            function resetForm() {
+                editId = null;
+                input.value = '';
+                submitBtn.textContent = 'Add';
+                submitBtn.classList.replace('bg-green-600', 'bg-blue-600');
+                submitBtn.classList.replace('hover:bg-green-700', 'hover:bg-blue-700');
+            }
+
+            // Search
+            searchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                render();
+            });
+
+            // Filters
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    // Reset styling
+                    filterBtns.forEach(b => {
+                        b.className = 'filter-btn px-3 py-1.5 text-sm font-medium rounded text-gray-600 hover:bg-gray-200';
+                    });
+                    
+                    // Active styling
+                    e.target.className = 'filter-btn px-3 py-1.5 text-sm font-medium rounded bg-blue-100 text-blue-700';
+                    
+                    currentFilter = e.target.dataset.filter;
+                    render();
+                });
+            });
+
+            // Helper
+            function escapeHTML(str) {
+                return str.replace(/[&<>'"]/g, tag => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+                }[tag]));
+            }
+
+            // Initial render
+            render();
+        });
+    </script>
+</body>
+</html>
